@@ -115,6 +115,25 @@ class Stranger(Person):
 
         return False
 
+    # 更新目标的坐标
+    def updatePerson(self, image):
+
+        self.isFind = True
+
+        # 如果目标是重新出现在视野中的
+        if self.lostTime > 0:
+            # 改变一下框的颜色
+            self.lostTime = 0
+            self.setColor((0, 0, 255))
+
+        if self.colorTime > 0:
+            self.colorTime -= 1
+            cv2.rectangle(image, (self.x, self.y), (self.x + self.w, self.y + self.h), self.color, 2)
+        else:
+            cv2.rectangle(image, (self.x, self.y), (self.x + self.w, self.y + self.h), (0, 255, 0), 2)
+
+        cv2.putText(image, str(self.uid), (self.x + 5, self.y + 5),  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
 
 class RecognitionServer(threading.Thread):
 
@@ -123,6 +142,9 @@ class RecognitionServer(threading.Thread):
 
         # 一帧图像
         self.frame = None
+
+        # 视野中未出现人的次数
+        self.notFoundTime = 0
 
         # 存放所有已经找到的人
         self.strangers = {}
@@ -163,44 +185,53 @@ class RecognitionServer(threading.Thread):
                 minSize=(50, 50)
             )
 
-            # 遍历人脸找已知的目标
-            for (x, y, w, h) in faces:
-                
-                if len(self.persons) > 0:
-                    # 检查有没有已知的目标
-                    uid, confidence = self.recognizer.predict(gray[y : y + h, x : x + w])
-
-                    if 0 < confidence < 45:
-                        self.persons[uid].updateLocation(x, y, w, h)
-                        self.persons[uid].updatePerson(image)
-                        continue
-
-                # 遍历所有未知目标
-                for (uid, stranger) in self.strangers.items():
-                    if not stranger.isFind and stranger.isPersion(x, y, w, h):
-                        stranger.updatePerson(image)
-                        if stranger.recognitionStranger(gray):
-                            # 对陌生人的识别结束，将其添加到已知目标列表
-                            self.persons[uid] = self.strangers.pop(uid)
-                            self.needUpdate = True
-                        break
+            if len(faces) == 0:
+                self.notFoundTime += 1
+                if self.notFoundTime > 500:
+                    cv2.waitKey(1000)
                 else:
-                    # 都找不到就添加一个新目标
-                    uid = int(time.time() * 100) % 100000
-                    self.strangers[uid] = Stranger(uid, x, y, w, h)
+                    cv2.waitKey(100)
+            else:
+                self.notFoundTime = 0
+                # 遍历人脸找已知的目标
+                for (x, y, w, h) in faces:
+                    
+                    if len(self.persons) > 0:
+                        # 检查有没有已知的目标
+                        uid, confidence = self.recognizer.predict(gray[y : y + h, x : x + w])
 
-            self.removeUnfindBody()
+                        if 0 < confidence < 45:
+                            self.persons[uid].updateLocation(x, y, w, h)
+                            self.persons[uid].updatePerson(image)
+                            continue
 
-            if self.needUpdate:
-                self.recognizer = cv2.face.LBPHFaceRecognizer_create()
-                self.recognizer.train(list(map(lambda person:person.image, self.persons.values())), np.array(list(map(lambda person:person.uid, self.persons.values()))))
-                self.needUpdate = False
+                    # 遍历所有未知目标
+                    for (uid, stranger) in self.strangers.items():
+                        if not stranger.isFind and stranger.isPersion(x, y, w, h):
+                            stranger.updatePerson(image)
+                            if stranger.recognitionStranger(gray):
+                                # 对陌生人的识别结束，将其添加到已知目标列表
+                                self.persons[uid] = self.strangers.pop(uid)
+                                self.needUpdate = True
+                            break
+                    else:
+                        # 都找不到就添加一个新目标
+                        uid = int(time.time() * 100) % 100000
+                        self.strangers[uid] = Stranger(uid, x, y, w, h)
+
+                self.removeUnfindBody()
+
+                if self.needUpdate:
+                    self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+                    self.recognizer.train(list(map(lambda person:person.image, self.persons.values())), np.array(list(map(lambda person:person.uid, self.persons.values()))))
+                    self.needUpdate = False
+
+                cv2.waitKey(100)
 
             with self.condition:
                 self.frame = image
                 self.condition.notifyAll()
 
-            cv2.waitKey(100)
 
     # 移除已丢失的目标
     def removeUnfindBody(self):
@@ -211,7 +242,7 @@ class RecognitionServer(threading.Thread):
                 # 目标丢失
                 person.lostTime += 1
                 # 丢失次数过多后删除目标
-                if person.lostTime == 10:
+                if person.lostTime == 3:
                     self.persons.pop(uid)
             else:
                 person.isFind = False
@@ -222,7 +253,7 @@ class RecognitionServer(threading.Thread):
                 # 目标丢失
                 stranger.lostTime += 1
                 # 丢失次数过多后删除目标
-                if stranger.lostTime == 30:
+                if stranger.lostTime == 50:
                     self.strangers.pop(uid)
             else:
                 stranger.isFind = False
