@@ -3,6 +3,7 @@ import time
 import threading
 
 import cv2
+import requests
 import numpy as np
 
 #
@@ -150,6 +151,8 @@ class RecognitionServer(threading.Thread):
         self.strangers = {}
         self.persons = {}
 
+        self.isMoving = False
+
         # 进程是否结束
         self.isFinish = False
 
@@ -186,13 +189,30 @@ class RecognitionServer(threading.Thread):
             )
 
             if len(faces) == 0:
-                self.notFoundTime += 1
                 if self.notFoundTime > 500:
                     cv2.waitKey(1000)
                 else:
+                    self.notFoundTime += 1
                     cv2.waitKey(100)
             else:
                 self.notFoundTime = 0
+
+                if len(faces) == 1:
+
+                    (x, y, w, h) = faces[0]
+
+                    height = image.shape[0]
+                    width = image.shape[1]
+
+                    if x > width / 2:
+                        self.moveRight()
+                    elif width / 2 > x + w:
+                        self.moveLeft()
+                    elif y > height / 2:
+                        self.moveDown()
+                    elif height / 2 > y + h:
+                        self.moveUp()
+
                 # 遍历人脸找已知的目标
                 for (x, y, w, h) in faces:
                     
@@ -226,12 +246,11 @@ class RecognitionServer(threading.Thread):
                     self.recognizer.train(list(map(lambda person:person.image, self.persons.values())), np.array(list(map(lambda person:person.uid, self.persons.values()))))
                     self.needUpdate = False
 
-                cv2.waitKey(100)
+                cv2.waitKey(50)
 
             with self.condition:
                 self.frame = image
                 self.condition.notifyAll()
-
 
     # 移除已丢失的目标
     def removeUnfindBody(self):
@@ -257,3 +276,40 @@ class RecognitionServer(threading.Thread):
                     self.strangers.pop(uid)
             else:
                 stranger.isFind = False
+    
+    def moveUp(self):
+        if not self.isMoving:
+            self.isMoving = True
+            MoveCamera(self, 'http://192.168.5.4/up').start()
+    
+    def moveDown(self):
+        if not self.isMoving:
+            self.isMoving = True
+            MoveCamera(self, 'http://192.168.5.4/down').start()
+
+    def moveLeft(self):
+        if not self.isMoving:
+            self.isMoving = True
+            MoveCamera(self, 'http://192.168.5.4/left').start()
+
+    def moveRight(self):
+        if not self.isMoving:
+            self.isMoving = True
+            MoveCamera(self, 'http://192.168.5.4/right').start()
+
+
+# 用于移动摄像头的线程
+class MoveCamera(threading.Thread):
+
+    def __init__(self, parent:RecognitionServer, url:str):
+        super().__init__()
+        self.parent = parent
+        self.url = url
+
+    def run(self):
+        try:
+            requests.get(self.url)
+        except:
+            pass
+        self.parent.isMoving = False
+            
