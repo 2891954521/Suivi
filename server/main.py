@@ -10,8 +10,14 @@ if __name__ == '__main__':
     recognition.start()
     server.start()
 
-    server.join()
+    try:
 
-    print("退出主线程")
+        while True:
+            pass
+
+    except KeyboardInterrupt:
+        print("退出主线程")
+        recognition.isFinish = True
+        server.isFinish = True
 
     exit()

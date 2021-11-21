@@ -3,7 +3,6 @@ import threading
 
 import cv2
 import numpy as np
-from numpy.core.fromnumeric import clip
 
 from recognition import RecognitionServer
 

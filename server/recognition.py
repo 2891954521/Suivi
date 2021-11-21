@@ -64,6 +64,8 @@ class Stranger(Person):
 
         self.count = 0
 
+        self.notfoundTime = 0
+
         self.faces = []
 
         self.time = [0 for _ in range(5)]
@@ -88,11 +90,14 @@ class Stranger(Person):
             return False
 
     # 对陌生人进行识别
-    def recognitionStranger(self, gray) -> bool:
+    # 返回值：1：识别完成，0：还在识别，-1：超时
+    def recognitionStranger(self, gray) -> int:
+
+        face = gray[self.y : self.y + self.h, self.x : self.x + self.w]
 
         if len(self.faces) < 5:
             # 先捕获5张人脸
-            self.faces.append(gray[self.y : self.y + self.h, self.x : self.x + self.w])
+            self.faces.append(face)
 
             if len(self.faces) == 5:
                 # 用这5张人脸训练一个临时模型
@@ -101,20 +106,29 @@ class Stranger(Person):
 
         elif self.count < 10:
             # 用这个模型匹配10张人脸
-            i, confidence = self.recognizer.predict(gray)
+            i, confidence = self.recognizer.predict(face)
 
             if 0 < confidence < 45:
                 self.time[i] += 1
                 self.count += 1
+            else:
+                self.notfoundTime += 1
+                if self.notfoundTime > 20:
+                    return -1
             
             if self.count == 10:
                 # 取最优匹配的人脸
                 self.image = self.faces[self.time.index(max(self.time))]
+
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'face')
+                
+                cv2.imwrite(os.path.join(path, str(self.uid) + ".jpg"), self.image)
+
                 # 释放内存
                 del self.faces
-                return True
+                return 1
 
-        return False
+        return 0
 
     # 更新目标的坐标
     def updatePerson(self, image):
@@ -197,21 +211,21 @@ class RecognitionServer(threading.Thread):
             else:
                 self.notFoundTime = 0
 
-                if len(faces) == 1:
+                # if len(faces) == 1:
 
-                    (x, y, w, h) = faces[0]
+                #     (x, y, w, h) = faces[0]
 
-                    height = image.shape[0]
-                    width = image.shape[1]
+                #     height = image.shape[0]
+                #     width = image.shape[1]
 
-                    if x > width / 2:
-                        self.moveRight()
-                    elif width / 2 > x + w:
-                        self.moveLeft()
-                    elif y > height / 2:
-                        self.moveDown()
-                    elif height / 2 > y + h:
-                        self.moveUp()
+                #     if x > width / 2:
+                #         self.moveRight()
+                #     elif width / 2 > x + w:
+                #         self.moveLeft()
+                #     elif y > height / 2:
+                #         self.moveDown()
+                #     elif height / 2 > y + h:
+                #         self.moveUp()
 
                 # 遍历人脸找已知的目标
                 for (x, y, w, h) in faces:
@@ -229,10 +243,14 @@ class RecognitionServer(threading.Thread):
                     for (uid, stranger) in self.strangers.items():
                         if not stranger.isFind and stranger.isPersion(x, y, w, h):
                             stranger.updatePerson(image)
-                            if stranger.recognitionStranger(gray):
+                            code = stranger.recognitionStranger(gray)
+                            if code == 1:
                                 # 对陌生人的识别结束，将其添加到已知目标列表
+                                print("find new persion:" + str(uid))
                                 self.persons[uid] = self.strangers.pop(uid)
                                 self.needUpdate = True
+                            elif code == -1:
+                                self.strangers.pop(uid)
                             break
                     else:
                         # 都找不到就添加一个新目标
